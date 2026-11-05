@@ -1,6 +1,6 @@
 import hw3_common;
 
-[shader("compute")]
+[shader("compute")] 
 [numthreads(8, 8, 1)]
 void compute_main(uint2 tid : SV_DispatchThreadID,
                   uniform float3 background,
