@@ -43,17 +43,77 @@ def compose_transformations(transformations):
     """
         Given a list of transformations, compose them into a matrix.
     """
-    # HW 3.4: copy paste your HW2.3 code here
-
     F = np.eye(4, dtype=np.float32)
+
+    for transform in transformations:
+        
+        # HW 2.3 TODO: your code here
+        for type, values in transform.items():
+            match(type):
+                case "scale":
+                    s = transform[type]
+                    scale = np.array([[s[0],0,0,0],[0, s[1], 0,0],[0,0,s[2],0],[0,0,0,1]])
+                    F = scale @ F
+                case "rotate_x":
+                    angleX = transform[type][0]
+                    rotate_x = np.array([[1,0,0,0],[0, math.cos(math.radians(angleX)), -math.sin(math.radians(angleX)),0],[0,math.sin(math.radians(angleX)),math.cos(math.radians(angleX)),0],[0,0,0,1]])
+                    F = rotate_x @ F
+                case "rotate_y":
+                    angleY = transform[type][0]
+                    rotate_y = np.array([[math.cos(math.radians(angleY)),0,math.sin(math.radians(angleY)),0],[0, 1, 0,0],[-math.sin(math.radians(angleY)),0,math.cos(math.radians(angleY)),0],[0,0,0,1]])
+                    F = rotate_y @ F
+                case "rotate_z":
+                    angleZ = transform[type][0]
+                    rotate_z = np.array([[math.cos(math.radians(angleZ)),-math.sin(math.radians(angleZ)),0,0],[math.sin(math.radians(angleZ)), math.cos(math.radians(angleZ)), 0,0],[0,0,1,0],[0,0,0,1]])
+                    F = rotate_z @ F
+                case "lookat":
+                    p = transform[type]['position']
+                    t = transform[type]['target']
+                    u = transform[type]['up']
+                    sub = [x-y for x,y in zip(t,p)]
+                    d =  (sub)/np.linalg.norm(sub)
+                    r = np.cross(d,u)/np.linalg.norm(np.cross(d,u))
+                    uPrime = np.cross(r,d)
+                    lookat = np.array([[r[0],uPrime[0],-d[0],p[0]],[r[1], uPrime[1], -d[1], p[1]],[r[2],uPrime[2],-d[2],p[2]],[0,0,0,1]])
+                    F = lookat @ F
+                case "translate":
+                    tB = transform[type]
+                    translate = np.array([[1,0,0,tB[0]],[0, 1, 0,tB[1]],[0,0,1,tB[2]],[0,0,0,1]])
+                    F = translate @ F 
+                
+
     return F
 
-def interpolate_transformation(transform_keyframes, t):
-    # HW 3.4: copy your HW2.4 code here.
 
-    # create a new transform from the two keyframes
-    interp_transforms = []
-    return interp_transforms
+def interpolate_transformation(transform_keyframes, t):
+    for i in range(len(transform_keyframes) - 1):
+        if t >= transform_keyframes[i]["time"] and t <= transform_keyframes[i+1]["time"]:
+            w = (t - transform_keyframes[i]["time"])/(transform_keyframes[i+1]["time"] - transform_keyframes[i]["time"])
+            interp_transforms = []
+            for j in range(len(transform_keyframes[i]["transform"])):
+                    before = transform_keyframes[i]["transform"][j]
+                    after = transform_keyframes[i+1]["transform"][j]
+                    for key, values in before.items():
+                        blended = []
+                        if key == "lookat":
+                            total = {}
+                            for ke, val in values.items():
+                                other = after[key][ke]
+                                result = []
+                                for k in range(len(val)):
+                                    r = (1-w) * val[k] 
+                                    answer = other[k] * w
+                                    result.append(r +answer)
+                                total[ke] = result
+                            interp_transforms.append({"lookat" : total})
+                        else:
+                            for k in range(len(values)):
+                                blend = (1-w) * values[k] + w * after[key][k]
+                                blended.append(blend)
+                            interp_transforms.append({key: blended})
+            return interp_transforms  
+    # Should never happen?
+    assert False
 
 def get_transformation(obj, t):
     transforms = obj.get('transform', [])
