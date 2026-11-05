@@ -8,9 +8,15 @@ void compute_main(uint2 tid : SV_DispatchThreadID,
                   StructuredBuffer<Shape> shapes,
                   uniform int num_shapes,
                   StructuredBuffer<Sphere> spheres,
+                  //contains basically object info, number of triangles that make up each mesh
+                  //contains the start and end index of eash mesh/object
+                  //also has vertex offset which is a quicker way of finding the first vertex of the first triangle
                   StructuredBuffer<TriangleMesh> meshes,
+                  //pretty self explanatory contains points that make up each of the traingles
                   StructuredBuffer<float3> vertices,
+                  //uses same index as vertices its used to find their normals
                   StructuredBuffer<float3> vertex_normals,
+                  //contains the vertices, not the points directly which make up each of the triangle points
                   StructuredBuffer<uint3> triangles,
                   StructuredBuffer<PointLight> lights,
                   uniform int num_lights,
@@ -55,70 +61,22 @@ void compute_main(uint2 tid : SV_DispatchThreadID,
         // compute contribution from point lights    
         float closeT = 1e30;
         int closestIndex = -1;
+        //vertex normals of closest triangle just because I'm lazy to find so they are just saved outside scope
+        float3 n0;
+        float3 n1;
+        float3 n2;
+        float3 closestBay;
         for (int i = 0; i < num_shapes; i++) {
             //now this is pretty much to change the ray so it hits the theoretical untransformed object
             float3 directionToObject = xform_vec(shapes[i].world_to_obj, directionToWorld);
             float3 originToObject = xform_pt(shapes[i].world_to_obj, originToWorld);
-            
-            float3 sphereCenter = spheres[shapes[i].index].center;
-            float sphereRadius = spheres[shapes[i].index].radius;
-            float3 oc = originToObject - sphereCenter;
-            float A = dot(directionToObject, directionToObject);
-            float B = 2 * dot(oc, directionToObject);
-            float C = dot(oc, oc) - (sphereRadius * sphereRadius);
-            float2 t;
-            bool tF = solve_quadratic(A, B, C, t);
-            if (tF == false) {
-                continue;
-            }
-            float tNear = min(t.x, t.y);
-            float tFar = max(t.x, t.y);
-            float tHit;
-            if (tNear > EPSILON) {
-                tHit = tNear;
-            } else if (tFar > EPSILON) {
-                tHit = tFar;
-            } else {
-                continue;
-            }
-            if (tHit < closeT) {
-                closeT = tHit;
-                closestIndex = i;
-                originToObjectFinal = originToObject;
-                directionToObjectFinal = directionToObject;
-            }
-        }
-        if (closestIndex == -1) {
-            color += background * throughput;
-            break;
-        }
-
-        float3 hitPoint = originToObjectFinal + (closeT * directionToObjectFinal);
-        //so once it hits the untransformed object, that hitpoint doesn't tell us where to render it on the screen so we need to change it back
-        float3 hitPointTransformed = xform_pt(shapes[closestIndex].obj_to_world, hitPoint);
-        float3 normal = normalize(hitPoint - spheres[shapes[closestIndex].index].center);
-        //you also need to normalize it again because the transformation can make it longer then 1
-        //world_to_obj is already the inverse of obj_to_world, so we just need to take the transpose of it
-        float3 normalTransformed = normalize(xform_vec(transpose(shapes[closestIndex].world_to_obj), normal));
-        float3 contribution = float3(0, 0, 0);
-        for (int j = 0; j < num_lights; j++) {
-            float3 toLight = lights[j].position - hitPointTransformed;
-            float3 lightDir = normalize(toLight);
-            float cosine = max(dot(normalTransformed, lightDir), 0.0);
-            float sqrDist = dot(toLight, toLight);
-            float3 material = shapes[closestIndex].Kd;
-            float3 lightColor = lights[j].intensity;
-            float3 combination = material * lightColor * cosine / sqrDist;
-            bool blocked = false;
-            for (int k = 0; k < num_shapes; k++) {
-                float3 sphereCenter = spheres[shapes[k].index].center;
-                float sphereRadius = spheres[shapes[k].index].radius;
-                //hitPointTransformed is still in world space and for this to work it needs to be in objectSpace
-                float3 oc = xform_pt(shapes[k].world_to_obj, hitPointTransformed) - sphereCenter;
-                //changes the light to be in object space so its compatible
-                float3 toLightObject = xform_vec(shapes[k].world_to_obj, toLight);
-                float A = dot(toLightObject, toLightObject);
-                float B = 2 * dot(oc, toLightObject);
+            //for some reason type is defined as 0 and 1
+            if(shapes[i].type == 0){
+                float3 sphereCenter = spheres[shapes[i].index].center;
+                float sphereRadius = spheres[shapes[i].index].radius;
+                float3 oc = originToObject - sphereCenter;
+                float A = dot(directionToObject, directionToObject);
+                float B = 2 * dot(oc, directionToObject);
                 float C = dot(oc, oc) - (sphereRadius * sphereRadius);
                 float2 t;
                 bool tF = solve_quadratic(A, B, C, t);
@@ -135,9 +93,121 @@ void compute_main(uint2 tid : SV_DispatchThreadID,
                 } else {
                     continue;
                 }
-                if (tHit < 1.0) {
-                    blocked = true;
-                    break;
+                if (tHit < closeT) {
+                    closeT = tHit;
+                    closestIndex = i;
+                    originToObjectFinal = originToObject;
+                    directionToObjectFinal = directionToObject;
+                }
+            }else{
+                //should contains the outputted baycentrix coordinates of output
+                float3 bay;
+                //should contain intersection time t
+                float t;
+                //you have to loop through all of the triangles on the mesh to see which one is on top and therfore should be considered
+                for(int j = meshes[shapes[i].index].triangle_begin; j < meshes[shapes[i].index].triangle_end; j++ ){
+                    //gets active triangles using offset
+                    uint3 tri = triangles[j]+ meshes[shapes[i].index].vertex_offset;
+                    float3 p0 = vertices[tri[0]];
+                    float3 p1 = vertices[tri[1]];
+                    float3 p2 = vertices[tri[2]];
+                    bool hit = intersect_tri(p0,p1,p2,originToObject,directionToObject,EPSILON,closeT,bay,t);
+                    //basically if t is less that means that there is a triangle closer to the camera
+                    if(hit &&  t < closeT){
+                        closeT = t;
+                        closestIndex = i;
+                        originToObjectFinal = originToObject;
+                        directionToObjectFinal = directionToObject;
+                        n0 = vertex_normals[tri[0]];
+                        n1 = vertex_normals[tri[1]];
+                        n2 = vertex_normals[tri[2]];
+                        closestBay = bay;
+                    }
+                }
+            }
+            
+        }
+        if (closestIndex == -1) {
+            color += background * throughput;
+            break;
+        }
+
+        float3 hitPoint = originToObjectFinal + (closeT * directionToObjectFinal);
+        //so once it hits the untransformed object, that hitpoint doesn't tell us where to render it on the screen so we need to change it back
+        float3 hitPointTransformed = xform_pt(shapes[closestIndex].obj_to_world, hitPoint);
+        //need to take into account normal can be calculates with mesh shape or sphere
+        float3 normal;
+        float3 normalTransformed;
+        if(shapes[closestIndex].type == 0){
+            normal = normalize(hitPoint - spheres[shapes[closestIndex].index].center);
+            //you also need to normalize it again because the transformation can make it longer then 1
+            //world_to_obj is already the inverse of obj_to_world, so we just need to take the transpose of it
+            normalTransformed = normalize(xform_vec(transpose(shapes[closestIndex].world_to_obj), normal));
+        }else{
+            normal = normalize(closestBay.x * n0 + closestBay.y * n1 + closestBay.z * n2);
+            normalTransformed = normalize(xform_vec(transpose(shapes[closestIndex].world_to_obj), normal));
+        }
+        float3 contribution = float3(0, 0, 0);
+        for (int j = 0; j < num_lights; j++) {
+            float3 toLight = lights[j].position - hitPointTransformed;
+            float3 lightDir = normalize(toLight);
+            float cosine = max(dot(normalTransformed, lightDir), 0.0);
+            float sqrDist = dot(toLight, toLight);
+            float3 material = shapes[closestIndex].Kd;
+            float3 lightColor = lights[j].intensity;
+            float3 combination = material * lightColor * cosine / sqrDist;
+            bool blocked = false;
+            for (int k = 0; k < num_shapes; k++) {
+                if(shapes[k].type == 0){
+                    float3 sphereCenter = spheres[shapes[k].index].center;
+                    float sphereRadius = spheres[shapes[k].index].radius;
+                    //hitPointTransformed is still in world space and for this to work it needs to be in objectSpace
+                    float3 oc = xform_pt(shapes[k].world_to_obj, hitPointTransformed) - sphereCenter;
+                    //changes the light to be in object space so its compatible
+                    float3 toLightObject = xform_vec(shapes[k].world_to_obj, toLight);
+                    float A = dot(toLightObject, toLightObject);
+                    float B = 2 * dot(oc, toLightObject);
+                    float C = dot(oc, oc) - (sphereRadius * sphereRadius);
+                    float2 t;
+                    bool tF = solve_quadratic(A, B, C, t);
+                    if (tF == false) {
+                        continue;
+                    }
+                    float tNear = min(t.x, t.y);
+                    float tFar = max(t.x, t.y);
+                    float tHit;
+                    if (tNear > EPSILON) {
+                        tHit = tNear;
+                    } else if (tFar > EPSILON) {
+                        tHit = tFar;
+                    } else {
+                        continue;
+                    }
+                    if (tHit < 1.0) {
+                        blocked = true;
+                        break;
+                    }
+                }else{
+                    //should contains the outputted baycentrix coordinates of output
+                    float3 bay;
+                    //should contain intersection time t
+                    float t;
+                    //you have to loop through all of the triangles on the mesh to see which one is on top and therfore should be considered
+                    for(int j = meshes[shapes[k].index].triangle_begin; j < meshes[shapes[k].index].triangle_end; j++ ){
+                        //gets active triangles using offset
+                        uint3 tri = triangles[j]+ meshes[shapes[k].index].vertex_offset;
+                        float3 p0 = vertices[tri[0]];
+                        float3 p1 = vertices[tri[1]];
+                        float3 p2 = vertices[tri[2]];
+                        float3 oc = xform_pt(shapes[k].world_to_obj, hitPointTransformed);
+                        float3 toLightObject = xform_vec(shapes[k].world_to_obj, toLight);
+                        bool hit = intersect_tri(p0,p1,p2,oc,toLightObject,EPSILON,1,bay,t);
+                        //basically if t is less that means that there is a triangle closer to the camera
+                        if(hit && t < 1){
+                            blocked = true;
+                            break;
+                        }
+                    }
                 }
             }
             if (blocked == false) {
