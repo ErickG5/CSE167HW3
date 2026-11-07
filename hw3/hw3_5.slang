@@ -55,8 +55,8 @@ void compute_main(uint2 tid : SV_DispatchThreadID,
 
     float3 color = 0.0;
     float3 throughput = 1.0;
-    float3 originToObjectFinal;
-    float3 directionToObjectFinal;
+    float3 originToObjectFinal = float3(0, 0, 0);
+    float3 directionToObjectFinal = float3(0, 0, 0);
     for (int b = 0; b < max_depth; b++) {
         // compute contribution from point lights    
         float closeT = 1e30;
