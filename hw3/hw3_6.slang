@@ -99,26 +99,49 @@ void compute_main(uint2 tid : SV_DispatchThreadID,
                 float3 bay;
                 //should contain intersection time t
                 float t;
-                //you have to loop through all of the triangles on the mesh to see which one is on top and therfore should be considered
-                for(int j = meshes[shapes[i].index].triangle_begin; j < meshes[shapes[i].index].triangle_end; j++ ){
-                    //gets active triangles using offset
-                    uint3 tri = triangles[j]+ meshes[shapes[i].index].vertex_offset;
-                    float3 p0 = vertices[tri[0]];
-                    float3 p1 = vertices[tri[1]];
-                    float3 p2 = vertices[tri[2]];
-                    bool hit = intersect_tri(p0,p1,p2,originToObject,directionToObject,EPSILON,closeT,bay,t);
-                    //basically if t is less that means that there is a triangle closer to the camera
-                    if(hit &&  t < closeT){
-                        closeT = t;
-                        closestIndex = i;
-                        originToObjectFinal = originToObject;
-                        directionToObjectFinal = directionToObject;
-                        n0 = vertex_normals[tri[0]];
-                        n1 = vertex_normals[tri[1]];
-                        n2 = vertex_normals[tri[2]];
-                        closestBay = bay;
+                int root = meshes[shapes[i].index].bvh_root_index;
+                int current = root;
+                int end = bvh_nodes[current].next_index;
+                //iterates through bvh nodes to find leaf node
+                while(current < end){
+                    //checks if this intersects the bounding box
+                    bool intersect = intersect_aabb(bvh_nodes[current].bbox_min, bvh_nodes[current].bbox_max, originToObject,directionToObject,EPSILON,closeT);
+                    //if it intersects then it adds one to advance to child node in predetermined order
+                    if(!intersect){
+                        current = bvh_nodes[current].next_index;
+                        //so that we just go to the next index
+                        continue;
                     }
+
+                    //so the main reason this is inside of the loop is that there is a chance that none of the triangles will intersect so you need to go to the next leaf
+                    if(bvh_nodes[current].is_leaf){
+                        //you have to loop through all of the triangles of the leaf node
+                        for(int j = bvh_nodes[current].triangle_begin; j < bvh_nodes[current].triangle_end; j++ ){
+                            //gets active triangles using offset
+                            //honestly I think this still works with the bvh optimization, but I'm not sure
+                            uint3 tri = triangles[j]+ meshes[shapes[i].index].vertex_offset;
+                            float3 p0 = vertices[tri[0]];
+                            float3 p1 = vertices[tri[1]];
+                            float3 p2 = vertices[tri[2]];
+                            bool hit = intersect_tri(p0,p1,p2,originToObject,directionToObject,EPSILON,closeT,bay,t);
+                            //basically if t is less that means that there is a triangle closer to the camera
+                            if(hit &&  t < closeT){
+                                closeT = t;
+                                closestIndex = i;
+                                originToObjectFinal = originToObject;
+                                directionToObjectFinal = directionToObject;
+                                n0 = vertex_normals[tri[0]];
+                                n1 = vertex_normals[tri[1]];
+                                n2 = vertex_normals[tri[2]];
+                                closestBay = bay;
+                            }
+                        }
+                    }
+    
+
+                    current+=1;
                 }
+                
             }
             
         }
@@ -187,22 +210,45 @@ void compute_main(uint2 tid : SV_DispatchThreadID,
                     float3 bay;
                     //should contain intersection time t
                     float t;
-                    //you have to loop through all of the triangles on the mesh to see which one is on top and therfore should be considered
-                    for(int j = meshes[shapes[k].index].triangle_begin; j < meshes[shapes[k].index].triangle_end; j++ ){
-                        //gets active triangles using offset
-                        uint3 tri = triangles[j]+ meshes[shapes[k].index].vertex_offset;
-                        float3 p0 = vertices[tri[0]];
-                        float3 p1 = vertices[tri[1]];
-                        float3 p2 = vertices[tri[2]];
-                        float3 oc = xform_pt(shapes[k].world_to_obj, hitPointTransformed);
-                        float3 toLightObject = xform_vec(shapes[k].world_to_obj, toLight);
-                        bool hit = intersect_tri(p0,p1,p2,oc,toLightObject,EPSILON,1,bay,t);
-                        //basically if t is less that means that there is a triangle closer to the camera
-                        if(hit && t < 1){
-                            blocked = true;
+                    int root = meshes[shapes[k].index].bvh_root_index;
+                    int current = root;
+                    int end = bvh_nodes[current].next_index;
+
+                    float3 oc = xform_pt(shapes[k].world_to_obj, hitPointTransformed);
+                    float3 toLightObject = xform_vec(shapes[k].world_to_obj, toLight);
+
+                    //iterates through bvh nodes to find leaf node
+                    while(current < end){
+                        //checks if this intersects the bounding box
+                        bool intersect = intersect_aabb(bvh_nodes[current].bbox_min, bvh_nodes[current].bbox_max, oc,toLightObject,EPSILON,1);
+                        //if it intersects then it adds one to advance to child node in predetermined order
+                        if(!intersect){
+                            current = bvh_nodes[current].next_index;
+                            //so that we just go to the next index
+                            continue;
+                        }
+                        if(bvh_nodes[current].is_leaf){
+                            //you have to loop through all of the triangles on the mesh to see which one is on top and therfore should be considered
+                            for(int j = bvh_nodes[current].triangle_begin; j < bvh_nodes[current].triangle_end; j++ ){
+                                //gets active triangles using offset
+                                uint3 tri = triangles[j]+ meshes[shapes[k].index].vertex_offset;
+                                float3 p0 = vertices[tri[0]];
+                                float3 p1 = vertices[tri[1]];
+                                float3 p2 = vertices[tri[2]];
+                                bool hit = intersect_tri(p0,p1,p2,oc,toLightObject,EPSILON,1,bay,t);
+                                //basically if t is less that means that there is a triangle closer to the camera
+                                if(hit && t < 1){
+                                    blocked = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if(blocked){
                             break;
                         }
+                        current+=1;
                     }
+                    
                 }
             }
             if (blocked == false) {
