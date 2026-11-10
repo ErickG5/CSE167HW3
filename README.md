@@ -28,3 +28,15 @@ You should see a window with white background.
 Balboa depends on [SlangPy](https://github.com/shader-slang/slangpy) as a GPU programming framework, and should work on Windows, Linux, and Apple Silicon Macs. 
 
 **Intel Macs:** SlangPy does not currently publish macOS x86_64 wheels, so setup may require building SlangPy from source. If you are using an Intel Mac and `uv sync` fails because no compatible SlangPy package is available, you may need to build SlangPy from source. Contact the staff/instructor if you run into issues.
+
+## Custom scene (Part 3.7)
+
+- **Scene file:** `scenes/hw3/mirror_hall.json`
+- **Rendering:** `outputs/hw_3_7.png` (rendered with `3_6`)
+- **Meshes used:** `scenes/hw3/meshes/bunny.ply`, `scenes/hw3/meshes/quad_mesh.json` (both provided with the assignment, no outside models)
+
+## AI Usage:
+
+Erick: Used to help understand certain concepts of the homework. 
+
+Thomas: Used to help understand certain concepts of the homework as well.
